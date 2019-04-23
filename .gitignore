@@ -73,8 +73,4 @@ fabric.properties
 
 # Editor-based Rest Client
 .idea/httpRequests
-
-.idea/mebsocket.iml
-.idea/misc.xml
-.idea/modules.xml
-.idea/vcs.xml
+.idea
