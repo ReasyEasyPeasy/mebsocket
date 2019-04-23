@@ -5,6 +5,7 @@ import (
 	"github.com/gorilla/websocket"
 	"net/http"
 	"strings"
+	"time"
 )
 
 var upgrader = websocket.Upgrader{
@@ -16,30 +17,54 @@ var upgrader = websocket.Upgrader{
 }
 
 func (s *MebServer) Init() {
-	fmt.Println("init")
-	s.acceptedConnsChannel = make(chan *websocket.Conn)
+	s.acceptedConnsChannel = make(chan channel)
 	s.newConnsChannel = make(chan *websocket.Conn)
-	go s.connectionHandler()
-}
-func NewMebsocket() MebServer {
-	s := MebServer{}
-
-	return s
+	s.declinedConnsChannel = make(chan *websocket.Conn)
+	go s.registerHandler()
+	go s.declinedConnectionHandler()
 }
 
-type mInterface interface {
-	AcceptToken(string) bool
-}
 type MebServer struct {
-	mInterface
-	newConnsChannel            chan *websocket.Conn
-	acceptedConnsChannel       chan *websocket.Conn
-	CheckFirstWebsocketMessage func(string) bool
+	newConnsChannel               chan *websocket.Conn
+	acceptedConnsChannel          chan channel
+	declinedConnsChannel          chan *websocket.Conn
+	needAuthorizationConnsChannel chan *websocket.Conn
+	Register                      func(string) (bool, Topic, time.Time)
 }
 
-func (s MebServer) AcceptToken(token string) bool {
-	fmt.Println("parent")
-	return true
+type Topic interface {
+	EqualTo(Topic) bool
+}
+
+type channel struct {
+	conn  *websocket.Conn
+	topic Topic
+	timer *time.Timer
+}
+
+func (c *channel) reader() {
+	for {
+		t, m, err := c.conn.ReadMessage()
+		if err != nil {
+			c.conn.Close()
+			return
+		}
+		fmt.Printf("Messagetype: %v Message: %v\n", t, string(m))
+	}
+}
+
+func (s MebServer) declinedConnectionHandler() {
+	for {
+		select {
+		case conn := <-s.declinedConnsChannel:
+			if err := conn.WriteMessage(websocket.TextMessage, []byte("{\"type\":\"UNAUTHORIZED\"}")); err != nil {
+				fmt.Println(err)
+			}
+			if err := conn.Close(); err != nil {
+				fmt.Println(err)
+			}
+		}
+	}
 }
 
 func (s MebServer) HandleWebsocketRequest(w http.ResponseWriter, r *http.Request) error {
@@ -50,7 +75,8 @@ func (s MebServer) HandleWebsocketRequest(w http.ResponseWriter, r *http.Request
 	s.newConnsChannel <- conn
 	return nil
 }
-func (s MebServer) connectionHandler() {
+
+func (s MebServer) registerHandler() {
 	for {
 		select {
 		case conn := <-s.newConnsChannel:
@@ -59,19 +85,28 @@ func (s MebServer) connectionHandler() {
 				if err != nil {
 					fmt.Println(err)
 				}
-				fmt.Println(string(m))
-				if s.AcceptToken(strings.TrimRight(string(m), "\n")) {
-					s.acceptedConnsChannel <- conn
-				} else {
-					fmt.Println("Unauthorized")
-					if err := conn.WriteMessage(websocket.TextMessage, []byte("{\"type\":\"UNAUTHORIZED\"}")); err != nil {
-						fmt.Println(err)
+				if ok, topic, tokenEnd := s.Register(strings.TrimRight(string(m), "\n")); ok {
+					timer := time.AfterFunc(tokenEnd.Sub(time.Now()), func() {
+						s.needAuthorizationConnsChannel <- conn
+					})
+					c := channel{
+						conn:  conn,
+						topic: topic,
+						timer: timer,
 					}
+					go c.reader()
+					s.acceptedConnsChannel <- c
+
+				} else {
+					s.declinedConnsChannel <- conn
+
 				}
 			}()
+
 		}
 	}
 }
+
 func upgradeToWebsocket(w http.ResponseWriter, r *http.Request) (*websocket.Conn, error) {
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
