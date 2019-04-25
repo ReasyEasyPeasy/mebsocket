@@ -12,6 +12,7 @@ var upgrader = websocket.Upgrader{
 	ReadBufferSize:  1024,
 	WriteBufferSize: 1024,
 	CheckOrigin: func(r *http.Request) bool {
+		fmt.Println(r.Header)
 		return true
 	},
 }
@@ -19,15 +20,33 @@ var upgrader = websocket.Upgrader{
 func (s *MebServer) Init() {
 	s.newConnsChannel = make(chan *websocket.Conn)
 	s.declinedConnsChannel = make(chan *websocket.Conn)
+	s.needAuthorizationConnsChannel = make(chan channel)
 	go s.registerHandler()
 	go s.declinedConnectionHandler()
+	go s.needAuthorizationHandler()
 }
 
 type MebServer struct {
 	newConnsChannel               chan *websocket.Conn
 	declinedConnsChannel          chan *websocket.Conn
-	needAuthorizationConnsChannel chan *websocket.Conn
+	needAuthorizationConnsChannel chan channel
 	Register                      func(string) (bool, interface{}, time.Time)
+}
+
+func (s MebServer) SendMessageForTopic(topic interface{}, m string) {
+	newsDistributerI.sendMessageToTopic(topic, m)
+}
+
+func (s MebServer) needAuthorizationHandler() {
+	for {
+		select {
+		case c := <-s.needAuthorizationConnsChannel:
+			fmt.Println("need authoriation")
+			newsDistributerI.unsubscribe(c)
+			c.write("{\"type\":\"UNAUTHORIZED\"}")
+			removeChannel(c)
+		}
+	}
 }
 
 func (s MebServer) declinedConnectionHandler() {
@@ -36,6 +55,10 @@ func (s MebServer) declinedConnectionHandler() {
 		case conn := <-s.declinedConnsChannel:
 			if err := conn.WriteMessage(websocket.TextMessage, []byte("{\"type\":\"UNAUTHORIZED\"}")); err != nil {
 				fmt.Println(err)
+				conn.Close()
+			} else {
+
+				s.newConnsChannel <- conn
 			}
 
 		}
@@ -63,14 +86,17 @@ func (s MebServer) registerHandler() {
 					return
 				}
 				if ok, topic, tokenEnd := s.Register(strings.TrimRight(string(m), "\n")); ok {
-					timer := time.AfterFunc(tokenEnd.Sub(time.Now()), func() {
-						s.needAuthorizationConnsChannel <- conn
-					})
 					c := channel{
 						conn:  conn,
 						topic: topic,
-						timer: timer,
+						timer: nil,
 					}
+					timer := time.AfterFunc(tokenEnd.Sub(time.Now()), func() {
+						fmt.Println("START authorization")
+						s.needAuthorizationConnsChannel <- c
+					})
+
+					c.timer = timer
 					go c.reader()
 					newsDistributerI.subscribe(c)
 

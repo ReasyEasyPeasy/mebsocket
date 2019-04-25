@@ -13,10 +13,10 @@ type channel struct {
 }
 
 func (c channel) reader() {
+	defer removeChannel(c)
 	for {
 		t, m, err := c.conn.ReadMessage()
 		if err != nil {
-			closeConnection(c)
 			return
 		}
 		fmt.Printf("Messagetype: %v Message: %v\n", t, string(m))
@@ -25,6 +25,6 @@ func (c channel) reader() {
 func (c channel) write(m string) {
 	if err := c.conn.WriteMessage(websocket.TextMessage, []byte(m)); err != nil {
 		fmt.Println(err)
-		closeConnection(c)
+		removeChannel(c)
 	}
 }

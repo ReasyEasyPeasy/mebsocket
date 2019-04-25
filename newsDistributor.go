@@ -1,6 +1,8 @@
 package mebsocket
 
-import "sync"
+import (
+	"sync"
+)
 
 type newsDistributer struct {
 	subscriber map[interface{}][]channel
