@@ -17,7 +17,6 @@ var upgrader = websocket.Upgrader{
 }
 
 func (s *MebServer) Init() {
-	s.acceptedConnsChannel = make(chan channel)
 	s.newConnsChannel = make(chan *websocket.Conn)
 	s.declinedConnsChannel = make(chan *websocket.Conn)
 	go s.registerHandler()
@@ -26,31 +25,9 @@ func (s *MebServer) Init() {
 
 type MebServer struct {
 	newConnsChannel               chan *websocket.Conn
-	acceptedConnsChannel          chan channel
 	declinedConnsChannel          chan *websocket.Conn
 	needAuthorizationConnsChannel chan *websocket.Conn
-	Register                      func(string) (bool, Topic, time.Time)
-}
-
-type Topic interface {
-	EqualTo(Topic) bool
-}
-
-type channel struct {
-	conn  *websocket.Conn
-	topic Topic
-	timer *time.Timer
-}
-
-func (c *channel) reader() {
-	for {
-		t, m, err := c.conn.ReadMessage()
-		if err != nil {
-			c.conn.Close()
-			return
-		}
-		fmt.Printf("Messagetype: %v Message: %v\n", t, string(m))
-	}
+	Register                      func(string) (bool, interface{}, time.Time)
 }
 
 func (s MebServer) declinedConnectionHandler() {
@@ -60,9 +37,7 @@ func (s MebServer) declinedConnectionHandler() {
 			if err := conn.WriteMessage(websocket.TextMessage, []byte("{\"type\":\"UNAUTHORIZED\"}")); err != nil {
 				fmt.Println(err)
 			}
-			if err := conn.Close(); err != nil {
-				fmt.Println(err)
-			}
+
 		}
 	}
 }
@@ -84,6 +59,8 @@ func (s MebServer) registerHandler() {
 				_, m, err := conn.ReadMessage()
 				if err != nil {
 					fmt.Println(err)
+					_ = conn.Close()
+					return
 				}
 				if ok, topic, tokenEnd := s.Register(strings.TrimRight(string(m), "\n")); ok {
 					timer := time.AfterFunc(tokenEnd.Sub(time.Now()), func() {
@@ -95,7 +72,7 @@ func (s MebServer) registerHandler() {
 						timer: timer,
 					}
 					go c.reader()
-					s.acceptedConnsChannel <- c
+					newsDistributerI.subscribe(c)
 
 				} else {
 					s.declinedConnsChannel <- conn
