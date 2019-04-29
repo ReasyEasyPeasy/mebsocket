@@ -12,7 +12,6 @@ var upgrader = websocket.Upgrader{
 	ReadBufferSize:  1024,
 	WriteBufferSize: 1024,
 	CheckOrigin: func(r *http.Request) bool {
-		fmt.Println(r.Header)
 		return true
 	},
 }
@@ -98,6 +97,7 @@ func (s MebServer) registerHandler() {
 
 					c.timer = timer
 					go c.reader()
+					go c.pinger()
 					newsDistributerI.subscribe(c)
 
 				} else {
