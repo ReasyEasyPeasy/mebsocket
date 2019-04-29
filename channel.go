@@ -17,8 +17,16 @@ func (c channel) reader() {
 	for {
 		t, m, err := c.conn.ReadMessage()
 		if err != nil {
+			fmt.Println(err)
 			return
 		}
+		if t == websocket.PingMessage {
+			if err := c.conn.WriteMessage(websocket.PongMessage, m); err != nil {
+				fmt.Println(err)
+				return
+			}
+		}
+
 		fmt.Printf("Messagetype: %v Message: %v\n", t, string(m))
 	}
 }
