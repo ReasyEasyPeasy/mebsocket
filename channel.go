@@ -15,7 +15,7 @@ type channel struct {
 func (c channel) pinger() {
 	for {
 		time.Sleep(time.Second * 2)
-		if err := c.conn.WriteMessage(websocket.PingMessage, []byte("Ping")); err != nil {
+		if err := c.conn.WriteMessage(websocket.PingMessage, []byte{}); err != nil {
 			fmt.Printf("Error beim ping:%v\n", err)
 			return
 		}
@@ -29,6 +29,10 @@ func (c channel) reader() {
 			fmt.Printf("Read Error: %v \n", err)
 			return
 
+		}
+		if t == websocket.PongMessage {
+			fmt.Println("Pong Message Send")
+			continue
 		}
 		if t == websocket.PingMessage {
 			fmt.Println("Ping Message Send")
