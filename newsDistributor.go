@@ -2,54 +2,55 @@ package mebsocket
 
 import (
 	"fmt"
+	"github.com/gorilla/websocket"
 	"sync"
 )
 
 type newsDistributer struct {
-	subscriber []subscriber
-	mu         sync.Mutex
+	subscribers []*subscriber
+	mu          sync.Mutex
 }
 
-var newsDistributerI newsDistributer
+var distributer newsDistributer
 
 func init() {
-	newsDistributerI.mu = sync.Mutex{}
+	distributer.mu = sync.Mutex{}
 }
 
-func (n *newsDistributer) subscribe(c subscriber) {
+func (n *newsDistributer) subscribe(c *subscriber) {
 	go func() {
 		n.mu.Lock()
 		defer func() {
-			fmt.Printf("Es gibt %v subscriber!", len(n.subscriber))
+			fmt.Printf("Es gibt %v subscribers!\n", len(n.subscribers))
 		}()
 		defer n.mu.Unlock()
-		n.subscriber = append(n.subscriber, c)
+		n.subscribers = append(n.subscribers, c)
 	}()
 }
 func (n *newsDistributer) sendMessageToTopic(topic Topic, message string) {
 	go func() {
 		n.mu.Lock()
 		defer n.mu.Unlock()
-		for _, c := range n.subscriber {
-			if c.topic.Equal(topic) {
-				c.write(message)
+		for _, sub := range n.subscribers {
+			if sub.topic.Equal(topic) {
+				sub.write(message)
 			}
 
 		}
 	}()
 
 }
-func (n *newsDistributer) unsubscribe(c subscriber) {
+func (n *newsDistributer) unsubscribe(c *websocket.Conn) {
 
 	go func() {
 		n.mu.Lock()
 		defer func() {
-			fmt.Printf("Es gibt %v subscriber!", len(n.subscriber))
+			fmt.Printf("Es gibt %v subscribers!\n", len(n.subscribers))
 		}()
 		defer n.mu.Unlock()
-		for i, c1 := range n.subscriber {
-			if c1 == c {
-				n.subscriber = append(n.subscriber[:i], n.subscriber[i+1:]...)
+		for i, sub := range n.subscribers {
+			if sub.conn == c {
+				n.subscribers = append(n.subscribers[:i], n.subscribers[i+1:]...)
 				return
 			}
 		}

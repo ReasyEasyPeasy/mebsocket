@@ -1,10 +1,9 @@
 package mebsocket
 
 import (
-	"fmt"
 	"github.com/gorilla/websocket"
 	"net/http"
-	"strings"
+	"sync"
 	"time"
 )
 
@@ -17,48 +16,24 @@ var upgrader = websocket.Upgrader{
 }
 
 func (s *MebServer) Init() {
-	s.newConnsChannel = make(chan *websocket.Conn)
-	s.declinedConnsChannel = make(chan *websocket.Conn)
-	s.needAuthorizationConnsChannel = make(chan subscriber)
-	go s.registerHandler()
-	go s.declinedConnectionHandler()
-	go s.needAuthorizationHandler()
+	s.declinedConnsChannel = make(chan *subscriber)
+	s.needAuthorizationConnsChannel = make(chan *subscriber)
+	go s.authorizationHandler()
+
 }
 
 type MebServer struct {
-	newConnsChannel               chan *websocket.Conn
-	declinedConnsChannel          chan *websocket.Conn
-	needAuthorizationConnsChannel chan subscriber
+	declinedConnsChannel          chan *subscriber
+	needAuthorizationConnsChannel chan *subscriber
 	Register                      func(string) (bool, Topic, time.Time)
 }
 
-func (s MebServer) SendMessageForTopic(topic Topic, m string) {
-	newsDistributerI.sendMessageToTopic(topic, m)
+func (s MebServer) PublishMessage(topic Topic, m string) {
+	distributer.sendMessageToTopic(topic, m)
 }
 
-func (s MebServer) needAuthorizationHandler() {
-	for {
-		select {
-		case c := <-s.needAuthorizationConnsChannel:
-			fmt.Println("need authoriation")
-			c.write("{\"type\":\"UNAUTHORIZED\"}")
-			removeChannel(c)
-		}
-	}
-}
-
-func (s MebServer) declinedConnectionHandler() {
-	for {
-		select {
-		case conn := <-s.declinedConnsChannel:
-
-			if err := conn.WriteMessage(websocket.TextMessage, []byte("{\"type\":\"UNAUTHORIZED\"}")); err != nil {
-				fmt.Println(err)
-
-			}
-			closeConnection(conn)
-		}
-	}
+func sendAuthorizationRequest(s *subscriber) {
+	s.write("{\"type\":\"UNAUTHORIZED\"}")
 }
 
 func (s MebServer) HandleWebsocketRequest(w http.ResponseWriter, r *http.Request) error {
@@ -66,38 +41,41 @@ func (s MebServer) HandleWebsocketRequest(w http.ResponseWriter, r *http.Request
 	if err != nil {
 		return err
 	}
-	s.newConnsChannel <- conn
+	s.needAuthorizationConnsChannel <- &subscriber{
+		conn:         conn,
+		timer:        nil,
+		messageMutex: sync.RWMutex{},
+		stopCh:       make(chan bool),
+		messageCh:    make(chan message),
+	}
 	return nil
 }
 
-func (s MebServer) registerHandler() {
+func (s MebServer) authorizationHandler() {
 	for {
 		select {
-		case conn := <-s.newConnsChannel:
+		case sub := <-s.needAuthorizationConnsChannel:
 			go func() {
-				_, m, err := conn.ReadMessage()
+				message, err := sub.readOnce()
 				if err != nil {
-					fmt.Println(err)
-					_ = conn.Close()
+					s.declinedConnsChannel <- sub
 					return
 				}
-				if ok, topic, tokenEnd := s.Register(strings.TrimRight(string(m), "\n")); ok {
-					c := subscriber{
-						conn:  conn,
-						topic: topic,
-						timer: nil,
-					}
+				if ok, topic, tokenEnd := s.Register(message); ok {
+
 					timer := time.AfterFunc(tokenEnd.Sub(time.Now()), func() {
-						fmt.Println("START authorization")
-						s.needAuthorizationConnsChannel <- c
+						sub.stop()
+						s.needAuthorizationConnsChannel <- sub
 					})
 
-					c.timer = timer
-					go c.reader()
-					newsDistributerI.subscribe(c)
+					sub.timer = timer
+					sub.topic = topic
+					sub.init()
+					distributer.subscribe(sub)
 
 				} else {
-					s.declinedConnsChannel <- conn
+					sendAuthorizationRequest(sub)
+					s.needAuthorizationConnsChannel <- sub
 
 				}
 			}()
