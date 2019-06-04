@@ -1,44 +1,55 @@
 package mebsocket
 
 import (
+	"fmt"
 	"sync"
 )
 
 type newsDistributer struct {
-	subscriber map[interface{}][]channel
+	subscriber []subscriber
 	mu         sync.Mutex
 }
 
 var newsDistributerI newsDistributer
 
 func init() {
-	newsDistributerI.subscriber = make(map[interface{}][]channel)
 	newsDistributerI.mu = sync.Mutex{}
 }
-func (n *newsDistributer) subscribe(c channel) {
+
+func (n *newsDistributer) subscribe(c subscriber) {
 	go func() {
 		n.mu.Lock()
+		defer func() {
+			fmt.Printf("Es gibt %v subscriber!", len(n.subscriber))
+		}()
 		defer n.mu.Unlock()
-		n.subscriber[c.topic] = append(n.subscriber[c.topic], c)
+		n.subscriber = append(n.subscriber, c)
 	}()
 }
-func (n *newsDistributer) sendMessageToTopic(topic interface{}, message string) {
+func (n *newsDistributer) sendMessageToTopic(topic Topic, message string) {
 	go func() {
 		n.mu.Lock()
 		defer n.mu.Unlock()
-		for _, c := range n.subscriber[topic] {
-			c.write(message)
+		for _, c := range n.subscriber {
+			if c.topic.Equal(topic) {
+				c.write(message)
+			}
+
 		}
 	}()
 
 }
-func (n *newsDistributer) unsubscribe(c channel) {
+func (n *newsDistributer) unsubscribe(c subscriber) {
+
 	go func() {
 		n.mu.Lock()
+		defer func() {
+			fmt.Printf("Es gibt %v subscriber!", len(n.subscriber))
+		}()
 		defer n.mu.Unlock()
-		for i, c1 := range n.subscriber[c.topic] {
+		for i, c1 := range n.subscriber {
 			if c1 == c {
-				n.subscriber[c.topic] = append(n.subscriber[c.topic][:i], n.subscriber[c.topic][i+1:]...)
+				n.subscriber = append(n.subscriber[:i], n.subscriber[i+1:]...)
 				return
 			}
 		}

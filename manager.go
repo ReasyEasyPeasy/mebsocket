@@ -19,7 +19,7 @@ var upgrader = websocket.Upgrader{
 func (s *MebServer) Init() {
 	s.newConnsChannel = make(chan *websocket.Conn)
 	s.declinedConnsChannel = make(chan *websocket.Conn)
-	s.needAuthorizationConnsChannel = make(chan channel)
+	s.needAuthorizationConnsChannel = make(chan subscriber)
 	go s.registerHandler()
 	go s.declinedConnectionHandler()
 	go s.needAuthorizationHandler()
@@ -28,11 +28,11 @@ func (s *MebServer) Init() {
 type MebServer struct {
 	newConnsChannel               chan *websocket.Conn
 	declinedConnsChannel          chan *websocket.Conn
-	needAuthorizationConnsChannel chan channel
-	Register                      func(string) (bool, interface{}, time.Time)
+	needAuthorizationConnsChannel chan subscriber
+	Register                      func(string) (bool, Topic, time.Time)
 }
 
-func (s MebServer) SendMessageForTopic(topic interface{}, m string) {
+func (s MebServer) SendMessageForTopic(topic Topic, m string) {
 	newsDistributerI.sendMessageToTopic(topic, m)
 }
 
@@ -41,7 +41,6 @@ func (s MebServer) needAuthorizationHandler() {
 		select {
 		case c := <-s.needAuthorizationConnsChannel:
 			fmt.Println("need authoriation")
-			newsDistributerI.unsubscribe(c)
 			c.write("{\"type\":\"UNAUTHORIZED\"}")
 			removeChannel(c)
 		}
@@ -52,14 +51,12 @@ func (s MebServer) declinedConnectionHandler() {
 	for {
 		select {
 		case conn := <-s.declinedConnsChannel:
+
 			if err := conn.WriteMessage(websocket.TextMessage, []byte("{\"type\":\"UNAUTHORIZED\"}")); err != nil {
 				fmt.Println(err)
-				conn.Close()
-			} else {
 
-				s.newConnsChannel <- conn
 			}
-
+			closeConnection(conn)
 		}
 	}
 }
@@ -85,7 +82,7 @@ func (s MebServer) registerHandler() {
 					return
 				}
 				if ok, topic, tokenEnd := s.Register(strings.TrimRight(string(m), "\n")); ok {
-					c := channel{
+					c := subscriber{
 						conn:  conn,
 						topic: topic,
 						timer: nil,
@@ -97,7 +94,6 @@ func (s MebServer) registerHandler() {
 
 					c.timer = timer
 					go c.reader()
-					go c.pinger()
 					newsDistributerI.subscribe(c)
 
 				} else {

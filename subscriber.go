@@ -6,13 +6,13 @@ import (
 	"time"
 )
 
-type channel struct {
+type subscriber struct {
 	conn  *websocket.Conn
-	topic interface{}
+	topic Topic
 	timer *time.Timer
 }
 
-func (c channel) pinger() {
+func (c subscriber) pinger() {
 	for {
 		time.Sleep(time.Second * 2)
 		if err := c.conn.WriteMessage(websocket.PingMessage, []byte{}); err != nil {
@@ -21,7 +21,7 @@ func (c channel) pinger() {
 		}
 	}
 }
-func (c channel) reader() {
+func (c subscriber) reader() {
 	defer removeChannel(c)
 	for {
 		t, m, err := c.conn.ReadMessage()
@@ -31,12 +31,12 @@ func (c channel) reader() {
 
 		}
 		if t == websocket.PongMessage {
-			fmt.Println("Pong Message Send")
+			fmt.Println("Pong Message received")
 			continue
 		}
 		if t == websocket.PingMessage {
 			fmt.Println("Ping Message Send")
-			if err := c.conn.WriteMessage(websocket.PongMessage, m); err != nil {
+			if err := c.conn.WriteMessage(websocket.PongMessage, []byte{}); err != nil {
 				fmt.Printf("Pong message error:%v\n", err)
 				return
 			}
@@ -45,7 +45,7 @@ func (c channel) reader() {
 		fmt.Printf("Messagetype: %v Message: %v\n", t, string(m))
 	}
 }
-func (c channel) write(m string) {
+func (c subscriber) write(m string) {
 	if err := c.conn.WriteMessage(websocket.TextMessage, []byte(m)); err != nil {
 		fmt.Println(err)
 		removeChannel(c)
