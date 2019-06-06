@@ -34,6 +34,7 @@ func (s subscriber) init() {
 }
 func (c subscriber) stop() {
 	c.stopCh <- true
+	c.timer.Stop()
 	closeConnection(c.conn)
 	distributer.unsubscribe(c.conn)
 }
